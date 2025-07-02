@@ -4,7 +4,7 @@ from threading import Thread
 from datetime import datetime
 import logging
 
-# Отключаем лог werkzeug
+# Отключаем подробные логи Flask
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 app = Flask(__name__)

@@ -5,7 +5,7 @@ DEBUG_MODE = False  # False — рабочий режим, True — тестов
 DB_PATH = 'court_tracking.db'
 
 def get_now() -> datetime:
-    # Системное время, обрезанное до минут
+    # Текущее время системы, без секунд и микросекунд
     return datetime.now().replace(second=0, microsecond=0)
 
 def init_db():
@@ -62,19 +62,15 @@ def adjust_to_work_hours(dt: datetime) -> datetime | None:
     if not is_workday(dt.date()):
         return None
     if dt.time() < WORKDAY_START:
-        # в начале рабочего дня
         return datetime.combine(dt.date(), WORKDAY_START)
     if dt.time() <= WORKDAY_END:
-        # в промежутке
         return dt
-    # после рабочего дня — запрещено
     return None
 
 def save_trip_start(user_id: int, org_id: str, org_name: str) -> bool:
     now = adjust_to_work_hours(get_now())
     if not now:
         return False
-
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute(
@@ -84,10 +80,9 @@ def save_trip_start(user_id: int, org_id: str, org_name: str) -> bool:
     if cursor.fetchone():
         conn.close()
         return False
-
     cursor.execute('''
         INSERT INTO trips
-            (user_id, organization_id, organization_name, start_datetime, status)
+          (user_id, organization_id, organization_name, start_datetime, status)
         VALUES (?, ?, ?, ?, 'in_progress')
     ''', (user_id, org_id, org_name, now))
     conn.commit()
@@ -133,4 +128,4 @@ def close_expired_trips():
         count += 1
     conn.commit()
     conn.close()
-    print(f"[{now.strftime('%Y-%m-%d %H:%M')}] Авто-завершено {count} поездок.")
+    print(f"[{now.strftime('%Y-%m-%d %H:%M')}] Авто‑завершено {count} поездок.")
