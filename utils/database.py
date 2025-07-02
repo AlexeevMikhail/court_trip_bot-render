@@ -1,12 +1,27 @@
 import sqlite3
 from datetime import datetime, date, time, timedelta
+import pytz
 
 DEBUG_MODE = True  # False — рабочий режим, True — тестовый
 DB_PATH = 'court_tracking.db'
 
+# Московский часовой пояс (pytz, чтобы работал normalize)
+MOSCOW_TZ = pytz.timezone("Europe/Moscow")
+
 def get_now() -> datetime:
-    # Текущее время системы, без секунд и микросекунд
-    return datetime.now().replace(second=0, microsecond=0)
+    """
+    Текущее время для бота:
+    - В DEBUG_MODE=True возвращаем системное локальное время (без секунд/микр).
+    - Иначе — московское время (UTC+3), без tzinfo, без секунд/микр.
+    """
+    if DEBUG_MODE:
+        return datetime.now().replace(second=0, microsecond=0)
+    # берем текущее UTC
+    utc_dt = datetime.now(pytz.utc)
+    # переводим в Москву
+    msk_dt = utc_dt.astimezone(MOSCOW_TZ)
+    # отбрасываем секунды/микр и возвращаем "наивное" datetime
+    return msk_dt.replace(tzinfo=None, second=0, microsecond=0)
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -57,6 +72,13 @@ def is_workday(d: date) -> bool:
     return d.weekday() < 5  # 0–4 → пн–пт
 
 def adjust_to_work_hours(dt: datetime) -> datetime | None:
+    """
+    Если weekday и время:
+      - до 09:00 → устанавливаем 09:00
+      - 09:00–18:00 → оставляем dt
+      - после 18:00 → возвращаем None (запрещено)
+    В DEBUG_MODE=True всегда возвращаем dt.
+    """
     if DEBUG_MODE:
         return dt
     if not is_workday(dt.date()):
