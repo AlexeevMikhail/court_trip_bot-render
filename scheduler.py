@@ -1,9 +1,10 @@
+# scheduler.py
+
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from utils.database import close_expired_trips
 import pytz
 
-# pytz‑таймзона, чтобы APScheduler не жаловался на normalize()
 MOSCOW_TZ = pytz.timezone("Europe/Moscow")
 
 def start_scheduler():
@@ -12,20 +13,20 @@ def start_scheduler():
     # Пн–Чт в 18:00 (мск)
     scheduler.add_job(
         close_expired_trips,
-        trigger=CronTrigger(day_of_week='mon-thu', hour=18, minute=0, timezone=MOSCOW_TZ),
+        trigger=CronTrigger(day_of_week='mon-thu', hour=18, minute=0),
         id='close_trips_mon_thu',
         replace_existing=True,
     )
-    print("📆 Задача автозакрытия поездок Пн–Чт в 18:00 добавлена.")
+    print("📆 Автозакрытие Пн–Чт в 18:00 добавлено.")
 
     # Пт в 16:45 (мск)
     scheduler.add_job(
         close_expired_trips,
-        trigger=CronTrigger(day_of_week='fri', hour=16, minute=45, timezone=MOSCOW_TZ),
+        trigger=CronTrigger(day_of_week='fri', hour=16, minute=45),
         id='close_trips_fri',
         replace_existing=True,
     )
-    print("📆 Задача автозакрытия поездок Пт в 16:45 добавлена.")
+    print("📆 Автозакрытие Пт в 16:45 добавлено.")
 
     scheduler.start()
-    print("✅ Планировщик успешно запущен.")
+    print("✅ Планировщик запущен.")

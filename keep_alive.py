@@ -4,7 +4,7 @@ from threading import Thread
 from datetime import datetime
 import logging
 
-# Отключаем лишние логи Flask
+# Отключаем лог werkzeug
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 app = Flask(__name__)
@@ -15,19 +15,19 @@ def home():
     if request.method == "HEAD":
         print(f"🔄 HEAD-запрос от UptimeRobot в {now}")
     else:
-        print(f"✅ GET-запрос на / — бот активен в {now}")
+        print(f"✅ GET-запрос на / в {now}")
     return "Бот активен", 200
 
 @app.route("/ping", methods=["GET"])
 def ping():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"✅ Получен GET-запрос на /ping в {now}")
+    print(f"✅ GET‑ping в {now}")
     return "Pong", 200
 
 @app.route("/health", methods=["GET"])
 def health():
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"🟢 Получен GET-запрос на /health в {now}")
+    print(f"🟢 Health‑check в {now}")
     return "Bot is alive", 200
 
 def run():
@@ -42,4 +42,4 @@ def run():
 
 def keep_alive():
     Thread(target=run, daemon=True, name="FlaskThread").start()
-    print(f"🛠️ Сервер keep_alive запущен на порту {os.environ.get('PORT', '5000')}")
+    print(f"🛠️ keep_alive запущен на порту {os.environ.get('PORT', '5000')}")
