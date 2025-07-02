@@ -1,3 +1,4 @@
+# bot.py
 import os
 import time
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
@@ -9,33 +10,29 @@ from dotenv import load_dotenv
 from keep_alive import keep_alive
 from scheduler import start_scheduler
 
-# Загрузка переменных окружения из .env
 load_dotenv()
-
-# Запускаем Flask‑сервер health‑check
 keep_alive()
 time.sleep(3)
 
-# Токен бота
 TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
-    print("❌ ОШИБКА: переменная BOT_TOKEN не задана")
+    print("❌ BOT_TOKEN is missing")
     exit(1)
 
 async def on_startup(app):
     print("🟢 Бот успешно запущен")
 
 def main():
-    # Инициализация БД
     init_db()
 
-    # Строим приложение
-    app = ApplicationBuilder()\
-        .token(TOKEN)\
-        .post_init(on_startup)\
+    app = (
+        ApplicationBuilder()
+        .token(TOKEN)
+        .job_queue(None)            # ← здесь отключаем встроенный JobQueue PTB
+        .post_init(on_startup)
         .build()
+    )
 
-    # Регистрируем handlers
     app.add_handler(register_command)
     app.add_handler(trip_command)
     app.add_handler(return_command)
@@ -43,15 +40,10 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_main_menu))
     app.add_handler(organization_callback)
 
-    # Запуск автозакрытия поездок
     start_scheduler()
 
-    # Старт polling
     print("⏳ Запуск polling...")
-    app.run_polling(
-        drop_pending_updates=True,
-        allowed_updates=["message", "callback_query"]
-    )
+    app.run_polling(drop_pending_updates=True, allowed_updates=["message","callback_query"])
 
 if __name__ == "__main__":
     try:
