@@ -3,15 +3,22 @@
 import sqlite3
 from datetime import datetime, date, time, timedelta
 
-DEBUG_MODE = True   # False — рабочий режим, True — тестовый (отключает проверку рабочих часов)
+DEBUG_MODE = True   # False — рабочий режим, True — тестовый
 DB_PATH = 'court_tracking.db'
+
+def get_conn():
+    """
+    Возвращает новое соединение с SQLite-базой.
+    Удобно для единообразного импорта из других модулей.
+    """
+    return sqlite3.connect(DB_PATH)
 
 def get_now() -> datetime:
     """Текущее системное время без секунд и микросекунд."""
     return datetime.now().replace(second=0, microsecond=0)
 
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     cur = conn.cursor()
     # Сотрудники
     cur.execute('''
@@ -24,17 +31,17 @@ def init_db():
     # Поездки
     cur.execute('''
         CREATE TABLE IF NOT EXISTS trips (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id         INTEGER,
-            organization_id TEXT,
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id           INTEGER,
+            organization_id   TEXT,
             organization_name TEXT,
-            start_datetime  DATETIME,
-            end_datetime    DATETIME,
-            status          TEXT,
+            start_datetime    DATETIME,
+            end_datetime      DATETIME,
+            status            TEXT,
             FOREIGN KEY(user_id) REFERENCES employees(user_id)
         )
     ''')
-    # Отпуска (если будет нужно)
+    # Отпуска (если понадобится)
     cur.execute('''
         CREATE TABLE IF NOT EXISTS vacations (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,14 +55,13 @@ def init_db():
     conn.close()
 
 def is_registered(user_id: int) -> bool:
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     cur = conn.cursor()
     cur.execute("SELECT 1 FROM employees WHERE user_id = ?", (user_id,))
     ok = cur.fetchone() is not None
     conn.close()
     return ok
 
-# Границы рабочего дня
 WORKDAY_START = time(9, 0)
 WORKDAY_END   = time(18, 0)
 
@@ -64,10 +70,10 @@ def is_workday(d: date) -> bool:
 
 def adjust_to_work_hours(dt: datetime) -> datetime | None:
     """
-    Если DEBUG_MODE=True — всегда возвращает dt.
+    Если DEBUG_MODE=True — возвращает dt без ограничений.
     Иначе:
       • в выходные — None
-      • до 09:00 — возвращает тот же день 09:00
+      • до 09:00 — возвращает тот же день в 09:00
       • между 09:00–18:00 — dt
       • после 18:00 — None
     """
@@ -85,9 +91,8 @@ def save_trip_start(user_id: int, org_id: str, org_name: str) -> bool:
     now = adjust_to_work_hours(get_now())
     if not now:
         return False
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     cur = conn.cursor()
-    # Проверка на уже в пути
     cur.execute(
         "SELECT 1 FROM trips WHERE user_id = ? AND status = 'in_progress'",
         (user_id,)
@@ -95,7 +100,6 @@ def save_trip_start(user_id: int, org_id: str, org_name: str) -> bool:
     if cur.fetchone():
         conn.close()
         return False
-    # Вставка новой поездки
     cur.execute('''
         INSERT INTO trips (
             user_id, organization_id, organization_name, start_datetime, status
@@ -106,13 +110,8 @@ def save_trip_start(user_id: int, org_id: str, org_name: str) -> bool:
     return True
 
 def end_trip(user_id: int) -> bool:
-    """
-    Завершает единственную активную поездку user_id:
-    ставит end_datetime = сейчас, status='completed'.
-    Возвращает True, если была обновлена хотя бы одна строка.
-    """
     now = get_now()
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     cur = conn.cursor()
     cur.execute('''
         UPDATE trips
@@ -126,11 +125,11 @@ def end_trip(user_id: int) -> bool:
 
 def close_expired_trips():
     """
-    Авто‑закрытие всех незавершённых поездок в базе:
+    Авто‑закрытие всех незавершённых поездок:
     если now <= start → end = start + 1 мин, иначе end = now.
     """
     now = get_now()
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_conn()
     cur = conn.cursor()
     cur.execute("SELECT id, start_datetime FROM trips WHERE status = 'in_progress'")
     rows = cur.fetchall()
