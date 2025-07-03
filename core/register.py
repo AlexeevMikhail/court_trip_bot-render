@@ -1,33 +1,29 @@
+# core/register.py
 from telegram import Update
 from telegram.ext import ContextTypes
-import sqlite3
+from utils.database import get_conn
 
-async def register(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def register_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    args = context.args
-    if not args:
+    full_name = " ".join(context.args).strip()
+    if not full_name:
         await update.message.reply_text(
-            "✏️ Введите ФИО после команды:\n/register Иванов Иван",
+            "❌ Пожалуйста, укажите имя: `/register Фамилия Имя`",
             parse_mode="Markdown"
         )
         return
-    full_name = ' '.join(args)
-    conn = sqlite3.connect("court_tracking.db")
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            "INSERT INTO employees (user_id, full_name) VALUES (?, ?)",
-            (user_id, full_name)
-        )
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("""
+            INSERT INTO employees (user_id, full_name)
+            VALUES (%s, %s)
+            ON CONFLICT (user_id) DO UPDATE
+              SET full_name = EXCLUDED.full_name,
+                  is_active = TRUE
+        """, (user_id, full_name))
         conn.commit()
-        await update.message.reply_text(
-            f"👤 Регистрация успешна! Добро пожаловать, {full_name} ✅",
-            parse_mode="Markdown"
-        )
-    except sqlite3.IntegrityError:
-        await update.message.reply_text(
-            "⚠️ Вы уже зарегистрированы.",
-            parse_mode="Markdown"
-        )
-    finally:
-        conn.close()
+
+    await update.message.reply_text(
+        f"✅ Вы успешно зарегистрированы как *{full_name}*",
+        parse_mode="Markdown"
+    )

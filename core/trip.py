@@ -1,9 +1,11 @@
-# core/trip.py
-
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
-from utils.database import is_registered, save_trip_start, get_now
-import sqlite3
+from utils.database import (
+    is_registered,
+    save_trip_start,
+    end_trip_db,
+    get_now
+)
 
 # Список организаций для выбора
 ORGANIZATIONS = {
@@ -31,13 +33,11 @@ ORGANIZATIONS = {
     'other':           "Другая организация"
 }
 
-async def start_trip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /trip — выбор организации."""
+async def trip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_registered(user_id):
         await update.message.reply_text(
-            "❌ Вы не зарегистрированы!\n"
-            "Отправьте /register Иванов Иван",
+            "❌ Вы не зарегистрированы! Используйте `/register Фамилия Имя`",
             parse_mode="Markdown"
         )
         return
@@ -48,84 +48,60 @@ async def start_trip(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text(
-        "🚗 *Куда вы отправляетесь?* Выберите организацию:",
+        "🚗 *Куда вы отправляетесь?*",
         reply_markup=reply_markup,
         parse_mode="Markdown"
     )
 
 async def handle_custom_org_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ввод текста для org_id == 'other'."""
     user_id = update.effective_user.id
     custom_org = update.message.text.strip()
     if not custom_org:
-        await update.message.reply_text("❌ Название организации не может быть пустым.")
+        await update.message.reply_text("❌ Название не может быть пустым.")
         return
     if not is_registered(user_id):
         await update.message.reply_text("❌ Вы не зарегистрированы.")
         return
 
     success = save_trip_start(user_id, "other", custom_org)
-    t = get_now().strftime("%H:%M")
+    time_now = get_now().strftime("%H:%M")
     if success:
         await update.message.reply_text(
-            f"🚀 Поездка в *{custom_org}* начата в *{t}*.\nХорошей дороги!",
+            f"🚀 Поездка в *{custom_org}* начата в *{time_now}*",
             parse_mode="Markdown"
         )
     else:
         await update.message.reply_text(
-            "❌ Не удалось начать поездку. "
-            "Возможно, вы уже в пути.",
+            "❌ Не удалось начать поездку. Возможно, вы уже в пути.",
             parse_mode="Markdown"
         )
 
-async def handle_trip_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик inline‑кнопки org_<org_id>."""
-    query = update.callback_query
-    await query.answer()
-
-    # Достаём org_id из callback_data
-    data = query.data  # формат "org_kuzminsky"
-    _, org_id = data.split("_", 1)
-    org_name = ORGANIZATIONS.get(org_id, org_id)
-
-    user_id = query.from_user.id or update.effective_user.id
-    success = save_trip_start(user_id, org_id, org_name)
-    t = get_now().strftime("%H:%M")
-
-    if success:
-        await query.edit_message_text(
-            f"🚌 Поездка в *{org_name}* начата в *{t}*.\nХорошей дороги!",
-            parse_mode="Markdown"
-        )
-    else:
-        await query.edit_message_text(
-            "❌ Не удалось начать поездку.\n"
-            "Возможно, вы уже в пути.",
-            parse_mode="Markdown"
-        )
-
-async def end_trip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /return — завершение поездки."""
+async def return_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    conn = sqlite3.connect("court_tracking.db")
-    cursor = conn.cursor()
-    now = get_now()
-
-    cursor.execute('''
-        UPDATE trips
-        SET end_datetime = ?, status = 'completed'
-        WHERE user_id = ? AND status = 'in_progress'
-    ''', (now, user_id))
-    conn.commit()
-    conn.close()
-
-    if cursor.rowcount > 0:
+    success = end_trip_db(user_id)
+    time_now = get_now().strftime("%H:%M")
+    if success:
         await update.message.reply_text(
-            f"🏁 Поездка завершена в *{now.strftime('%H:%M')}*.",
+            f"🏁 Поездка завершена в *{time_now}*",
             parse_mode="Markdown"
         )
     else:
         await update.message.reply_text(
             "⚠️ У вас нет активной поездки.",
+            parse_mode="Markdown"
+        )
+
+async def handle_trip_save(update: Update, context: ContextTypes.DEFAULT_TYPE, org_id: str, org_name: str):
+    user_id = update.effective_user.id
+    success = save_trip_start(user_id, org_id, org_name)
+    time_now = get_now().strftime("%H:%M")
+    if success:
+        await update.callback_query.edit_message_text(
+            f"🚌 Поездка в *{org_name}* начата в *{time_now}*",
+            parse_mode="Markdown"
+        )
+    else:
+        await update.callback_query.edit_message_text(
+            "❌ Не удалось начать поездку. Возможно, вы уже в пути.",
             parse_mode="Markdown"
         )

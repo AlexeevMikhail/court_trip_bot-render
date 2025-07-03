@@ -1,189 +1,134 @@
 import os
 import psycopg2
-from psycopg2.extras import RealDictCursor
 from datetime import datetime, date, time, timedelta
-import pytz
 
-# Тестовый режим — отключает ограничения по рабочему расписанию
-DEBUG_MODE = False  
-# Подключение к Postgres через URL из переменных окружения
-DATABASE_URL = os.getenv("DATABASE_URL")
-# Московский часовой пояс для get_now()
-MOSCOW_TZ = pytz.timezone("Europe/Moscow")
+DEBUG_MODE = False
+PG_DSN     = os.getenv("DATABASE_URL")  # e.g. postgresql://postgres:Пароль@…:6543/postgres
 
-# Рабочие рамки
-WORKDAY_START      = time(9,  0)   # 09:00
-WORKDAY_END_NORMAL = time(18, 0)   # 18:00 пн–чт
-WORKDAY_END_FRIDAY = time(16, 45)  # 16:45 в пятницу
-
-def get_conn():
-    """
-    Открывает новое соединение к Postgres.
-    """
-    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+# Границы рабочего дня
+WORKDAY_START = time(9, 0)
+WORKDAY_END   = time(18, 0)
 
 def get_now() -> datetime:
     """
-    Текущее московское время без tzinfo, без секунд и микросекунд.
+    Возвращает текущее московское время (UTC+3) без секунд и микросекунд.
     """
-    if DEBUG_MODE:
-        # локальное системное время (наивное) без секунд и микр.
-        return datetime.now().replace(second=0, microsecond=0)
-    # UTC -> Moscow
-    utc_dt = datetime.now(pytz.utc)
-    msk_dt = utc_dt.astimezone(MOSCOW_TZ)
-    # отбрасываем tzinfo, секунды и микросекеунды
-    return msk_dt.replace(tzinfo=None, second=0, microsecond=0)
+    now_utc = datetime.utcnow()
+    now_msk = now_utc + timedelta(hours=3)
+    return now_msk.replace(second=0, microsecond=0)
+
+def get_conn():
+    """Создаёт и возвращает новое соединение с Postgres."""
+    return psycopg2.connect(PG_DSN)
 
 def init_db():
-    """
-    Создает схемы tables employees, trips, vacations в Postgres, если их нет.
-    """
-    with get_conn() as conn:
-        cur = conn.cursor()
+    """Инициализирует схему: создаёт таблицы, если их нет."""
+    with get_conn() as conn, conn.cursor() as cur:
         cur.execute("""
         CREATE TABLE IF NOT EXISTS employees (
-          user_id       BIGINT PRIMARY KEY,
-          full_name     TEXT    NOT NULL,
-          is_active     BOOLEAN DEFAULT TRUE
+          user_id BIGINT PRIMARY KEY,
+          full_name TEXT NOT NULL,
+          is_active BOOLEAN DEFAULT TRUE
         );
         """)
         cur.execute("""
         CREATE TABLE IF NOT EXISTS trips (
-          id               SERIAL PRIMARY KEY,
-          user_id          BIGINT REFERENCES employees(user_id),
-          organization_id   TEXT,
+          id SERIAL PRIMARY KEY,
+          user_id BIGINT REFERENCES employees(user_id),
+          organization_id TEXT,
           organization_name TEXT,
-          start_datetime    TIMESTAMP,
-          end_datetime      TIMESTAMP,
-          status            TEXT
+          start_datetime TIMESTAMP,
+          end_datetime TIMESTAMP,
+          status TEXT
         );
         """)
         cur.execute("""
         CREATE TABLE IF NOT EXISTS vacations (
-          id         SERIAL PRIMARY KEY,
-          user_id    BIGINT REFERENCES employees(user_id),
+          id SERIAL PRIMARY KEY,
+          user_id BIGINT REFERENCES employees(user_id),
           start_date DATE,
-          end_date   DATE
+          end_date DATE
         );
         """)
         conn.commit()
 
 def is_registered(user_id: int) -> bool:
-    """
-    Проверяет, есть ли активный сотрудник с данным user_id.
-    """
-    with get_conn() as conn:
-        cur = conn.cursor()
+    """Проверяет, есть ли активный сотрудник с таким user_id."""
+    with get_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT 1 FROM employees WHERE user_id = %s", (user_id,))
         return cur.fetchone() is not None
 
-def is_workday(d: date) -> bool:
-    """
-    Рабочие дни: понедельник (0) — пятница (4).
-    """
-    return d.weekday() < 5
-
 def adjust_to_work_hours(dt: datetime) -> datetime | None:
     """
-    Пн–Чт: начало не раньше 09:00, конец не позже 18:00.
-    Пт:   начало не раньше 09:00, конец не позже 16:45.
-    Выходные — запрещены (None).
-    DEBUG_MODE=True — любые dt разрешены.
+    Переносит <09:00→09:00>, запрещает после 18:00 и в выходные.
+    В DEBUG_MODE всегда возвращает dt без изменений.
     """
     if DEBUG_MODE:
         return dt
-
-    wd = dt.date().weekday()
-    if wd >= 5:
-        # Суббота или воскресенье
+    if dt.weekday() >= 5:      # Saturday=5, Sunday=6
         return None
-
-    # Сдвиг раннего утра на начало рабочего
     if dt.time() < WORKDAY_START:
-        return datetime.combine(dt.date(), WORKDAY_START)
-
-    # Верхняя граница для Пт и для Пн–Чт
-    end_limit = WORKDAY_END_FRIDAY if wd == 4 else WORKDAY_END_NORMAL
-    if dt.time() > end_limit:
-        return None
-
-    return dt
+        return dt.replace(hour=9, minute=0)
+    if dt.time() <= WORKDAY_END:
+        return dt
+    return None
 
 def save_trip_start(user_id: int, org_id: str, org_name: str) -> bool:
     """
-    Начать новую поездку: проверяем,
-    что нет активной in_progress, и вставляем запись.
+    Начинает новую поездку, если сотрудник зарегистрирован и не в пути.
+    Возвращает True, если успешно; False, если уже есть in_progress или вне рабочего времени.
     """
     now = adjust_to_work_hours(get_now())
     if not now:
         return False
 
-    with get_conn() as conn:
-        cur = conn.cursor()
-        # Есть ли уже активная поездка?
-        cur.execute("""
-            SELECT 1 FROM trips
-            WHERE user_id = %s AND status = 'in_progress'
-        """, (user_id,))
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+          "SELECT 1 FROM trips WHERE user_id = %s AND status = 'in_progress'",
+          (user_id,)
+        )
         if cur.fetchone():
             return False
 
         cur.execute("""
-            INSERT INTO trips
-              (user_id, organization_id, organization_name, start_datetime, status)
-            VALUES (%s, %s, %s, %s, 'in_progress')
+          INSERT INTO trips
+            (user_id, organization_id, organization_name, start_datetime, status)
+          VALUES (%s, %s, %s, %s, 'in_progress')
         """, (user_id, org_id, org_name, now))
         conn.commit()
-    return True
+        return True
 
-def end_trip(user_id: int) -> bool:
+def end_trip_db(user_id: int) -> bool:
     """
-    Завершить текущую поездку: ставим end_datetime = now, status = completed.
+    Завершает текущую поездку (in_progress) для user_id.
+    Возвращает True, если найдена и обновлена запись.
     """
     now = get_now()
-    with get_conn() as conn:
-        cur = conn.cursor()
+    with get_conn() as conn, conn.cursor() as cur:
         cur.execute("""
-            UPDATE trips
-            SET end_datetime = %s, status = 'completed'
-            WHERE user_id = %s AND status = 'in_progress'
+          UPDATE trips
+          SET end_datetime = %s, status = 'completed'
+          WHERE user_id = %s AND status = 'in_progress'
         """, (now, user_id))
         updated = cur.rowcount
         conn.commit()
-    return updated > 0
+        return updated > 0
 
 def close_expired_trips():
     """
-    Авто‑закрытие всех поездок в статусе in_progress:
-    если now <= start — end = start+1мин, иначе end = now.
+    Автоматически закрывает все оставшиеся in_progress (по расписанию APScheduler).
+    Если now < start → end = start + 1 min, иначе end = now.
     """
     now = get_now()
-    with get_conn() as conn:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT id, start_datetime
-            FROM trips
-            WHERE status = 'in_progress'
-        """)
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, start_datetime FROM trips WHERE status = 'in_progress'")
         rows = cur.fetchall()
-
-        count = 0
-        for row in rows:
-            trip_id    = row['id']
-            start_dt   = row['start_datetime']
-            # обрезаем до минут
-            start_dt   = start_dt.replace(second=0, microsecond=0)
-            # выбираем конец
-            end_dt = start_dt + timedelta(minutes=1) if now <= start_dt else now
-
+        for trip_id, start in rows:
+            end = (start + timedelta(minutes=1)) if now <= start else now
             cur.execute("""
-                UPDATE trips
-                SET end_datetime = %s, status = 'completed'
-                WHERE id = %s
-            """, (end_dt, trip_id))
-            count += 1
-
+              UPDATE trips
+              SET end_datetime = %s, status = 'completed'
+              WHERE id = %s
+            """, (end, trip_id))
         conn.commit()
-
-    print(f"[{now.strftime('%Y-%m-%d %H:%M')}] Авто‑завершено {count} поездок.")
+    print(f"[{now.strftime('%Y-%m-%d %H:%M')}] Авто‑завершено {len(rows)} поездок.")
