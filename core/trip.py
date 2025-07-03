@@ -2,7 +2,8 @@
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
-from datetime import time
+from datetime import datetime
+
 from utils.database import (
     is_registered,
     save_trip_start,
@@ -10,30 +11,30 @@ from utils.database import (
     get_now
 )
 
-# Организации
+# Организации (суды и прочие)
 ORGANIZATIONS = {
-    'kuzminsky':      "Кузьминский районный суд",
-    'lefortovsky':    "Лефортовский районный суд",
-    'lyublinsky':     "Люблинский районный суд",
-    'meshchansky':    "Мещанский районный суд",
-    'nagatinsky':     "Нагатинский районный суд",
-    'perovsky':       "Перовский районный суд",
-    'shcherbinsky':   "Щербинский районный суд",
-    'tverskoy':       "Тверской районный суд",
-    'cheremushkinsky':"Черемушкинский районный суд",
-    'chertanovsky':   "Чертановский районный суд",
-    'msk_city':       "Московский городской суд",
-    'kassatsionny2':  "Второй кассационный суд общей юрисдикции",
-    'domodedovo':     "Домодедовский городской суд",
-    'lyuberetsky':    "Люберецкий городской суд",
-    'vidnoye':        "Видновский городской суд",
-    'justice_peace':  "Мировые судьи (судебный участок)",
-    'fns':            "ФНС",
-    'gibdd':          "ГИБДД",
-    'notary':         "Нотариус",
-    'post':           "Почта России",
-    'rosreestr':      "Росреестр",
-    'other':          "Другая организация (введите вручную)"
+    'kuzminsky':       "Кузьминский районный суд",
+    'lefortovsky':     "Лефортовский районный суд",
+    'lyublinsky':      "Люблинский районный суд",
+    'meshchansky':     "Мещанский районный суд",
+    'nagatinsky':      "Нагатинский районный суд",
+    'perovsky':        "Перовский районный суд",
+    'shcherbinsky':    "Щербинский районный суд",
+    'tverskoy':        "Тверской районный суд",
+    'cheremushkinsky': "Черемушкинский районный суд",
+    'chertanovsky':    "Чертановский районный суд",
+    'msk_city':        "Московский городской суд",
+    'kassatsionny2':   "Второй кассационный суд общей юрисдикции",
+    'domodedovo':      "Домодедовский городской суд",
+    'lyuberetsky':     "Люберецкий городской суд",
+    'vidnoye':         "Видновский городской суд",
+    'justice_peace':   "Мировые судьи (судебный участок)",
+    'fns':             "ФНС",
+    'gibdd':           "ГИБДД",
+    'notary':          "Нотариус",
+    'post':            "Почта России",
+    'rosreestr':       "Росреестр",
+    'other':           "Другая организация (введите вручную)"
 }
 
 async def start_trip(update: Update, context: ContextTypes.DEFAULT_TYPE):
